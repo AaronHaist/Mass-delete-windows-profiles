@@ -1,0 +1,88 @@
+# Define the usernames to keep
+$keepUsernames = @("Administrator", "YourUsername")
+
+# Set color function
+function Set-Color {
+    param([string]$text, [string]$color)
+    switch ($color) {
+        "green" { Write-Host $text -ForegroundColor Green }
+        "red" { Write-Host $text -ForegroundColor Red }
+        "yellow" { Write-Host $text -ForegroundColor Yellow }
+        "cyan" { Write-Host $text -ForegroundColor Cyan }
+        "blue" { Write-Host $text -ForegroundColor Blue }
+        "white" { Write-Host $text -ForegroundColor White }
+        default { Write-Host $text }
+    }
+}
+
+# Create a progress bar animation
+function Show-ProgressBar {
+    param ([int]$seconds)
+    for ($i = 0; $i -lt $seconds; $i++) {
+        Write-Host -NoNewline "Deleting." -ForegroundColor Cyan
+        Start-Sleep -Milliseconds 300
+        Write-Host -NoNewline "."
+        Start-Sleep -Milliseconds 300
+        Write-Host -NoNewline "."
+        Start-Sleep -Milliseconds 300
+        Write-Host "."
+        Start-Sleep -Milliseconds 300
+    }
+}
+
+# Get all user profiles
+$userProfiles = Get-WmiObject Win32_UserProfile | Where-Object { $_.Special -eq $false -and $_.LocalPath -ne $null }
+
+foreach ($profile in $userProfiles) {
+    # Extract the username from the profile path
+    $profilePath = $profile.LocalPath
+    $username = [System.IO.Path]::GetFileName($profilePath)
+
+    # Check if the username is not in the list of usernames to keep
+    if ($keepUsernames -notcontains $username) {
+        Set-Color "Attempting to delete profile for user: $username" "yellow"
+
+        # Check if the profile is currently in use (must be unloaded before deletion)
+        if ($profile.Loaded -eq $false) {
+            try {
+                # Attempt to remove registry entry for the profile first
+                $sid = $profile.SID
+                $regPath = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\$sid"
+                if (Test-Path $regPath) {
+                    try {
+                        Remove-Item -Path $regPath -Recurse -Force -ErrorAction Stop
+                        Set-Color "Removed registry entry for user: $username" "green"
+                    }
+                    catch {
+                        Set-Color "Failed to delete registry entry for user: $username. Error: $_" "red"
+                        # Skip deletion of the profile folder if registry deletion fails
+                        continue
+                    }
+                }
+                else {
+                    Set-Color "Registry entry not found for user: $username" "red"
+                    # Skip deletion of the profile folder if registry entry is not found
+                    continue
+                }
+
+                # Show progress bar animation
+                Show-ProgressBar -seconds 3
+
+                # Delete the user profile folder
+                Remove-Item -Recurse -Force "$profilePath" -ErrorAction Stop
+                Set-Color "Deleted profile folder for user: $username" "green"
+
+                Set-Color "Successfully deleted profile for user: $username" "green"
+            }
+            catch {
+                Set-Color "Failed to delete profile for user: $username. Error: $_" "red"
+            }
+        }
+        else {
+            Set-Color "Profile for user $username is currently loaded and cannot be deleted." "cyan"
+        }
+    }
+    else {
+        Set-Color "Keeping profile for user: $username" "blue"
+    }
+}
